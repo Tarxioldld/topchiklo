@@ -19,7 +19,7 @@ class ClaimThread(commands.Cog):
         self.bot.get_command('freply').add_check(check_reply)
         
         # Notification channel ID (set your channel ID here)
-        self.notification_channel_id = None  
+        self.notification_channel_id = 1247301906691526827 
 
     async def check_claimer(self, ctx, claimer_id):
         config = await self.db.find_one({'_id': 'config'})
