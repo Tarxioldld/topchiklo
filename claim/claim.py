@@ -7,19 +7,19 @@ from core.utils import match_user_id
 
 
 class ClaimThread(commands.Cog):
-    """Позволяет поддерживающим пользователям брать тикеты, отправляя команду claim в канале тикета"""
+    """Allows supporters to claim threads by sending claim in the thread channel"""
     
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.api.get_plugin_partition(self)
-        check_reply.fail_msg = 'Этот тикет был взят другим пользователем.'
+        check_reply.fail_msg = 'This thread has been claimed by another user.'
         self.bot.get_command('reply').add_check(check_reply)
         self.bot.get_command('areply').add_check(check_reply)
         self.bot.get_command('fareply').add_check(check_reply)
         self.bot.get_command('freply').add_check(check_reply)
         
-        # Добавляем параметр для канала уведомлений
-        self.notification_channel_id = None  # Установите здесь ID вашего канала уведомлений
+        # Notification channel ID (set your channel ID here)
+        self.notification_channel_id = None  
 
     async def check_claimer(self, ctx, claimer_id):
         config = await self.db.find_one({'_id': 'config'})
@@ -27,7 +27,7 @@ class ClaimThread(commands.Cog):
             if config['limit'] == 0:
                 return True
         else:
-            raise commands.BadArgument(f"Сначала установите лимит. `{ctx.prefix}claim limit`")
+            raise commands.BadArgument(f"Set Limit first. `{ctx.prefix}claim limit`")
 
         cursor = self.db.find({'guild': str(self.bot.modmail_guild.id)})
         count = 0
@@ -51,17 +51,17 @@ class ClaimThread(commands.Cog):
     @commands.command()
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     async def claim(self, ctx):
-        """Команда для взятия тикета"""
+        """Command to claim a thread"""
         claimer_id = str(ctx.author.id)
         channel_id = str(ctx.channel.id)
 
         if not await self.check_claimer(ctx, claimer_id):
-            await ctx.send("Вы превысили лимит взятых тикетов.")
+            await ctx.send("You have exceeded the claim limit.")
             return
 
         thread = await self.db.find_one({'thread_id': channel_id, 'guild': str(self.bot.modmail_guild.id)})
         if thread and 'claimers' in thread and len(thread['claimers']) != 0:
-            await ctx.send("Этот тикет уже был взят.")
+            await ctx.send("This thread has already been claimed.")
             return
 
         await self.db.find_one_and_update(
@@ -71,28 +71,38 @@ class ClaimThread(commands.Cog):
         )
 
         embed = discord.Embed(
-            title="Тикет взят",
-            description=f"{ctx.author.mention} взял тикет.",
+            title="Thread Claimed",
+            description=f"{ctx.author.mention} has claimed this thread.",
             color=discord.Color.green()
         )
         await ctx.send(embed=embed)
         
-        # Уведомление в заданный канал
+        # Notify the user who created the thread
+        log = await self.bot.api.get_log(ctx.channel.id)
+        if log:
+            user = self.bot.get_user(log.recipient.id)
+            if user:
+                await user.send(f"Your thread has been claimed by {ctx.author.mention} ({ctx.author.name}#{ctx.author.discriminator}).")
+
+        # Notification in the specified channel
         if self.notification_channel_id:
             notification_channel = self.bot.get_channel(self.notification_channel_id)
             if notification_channel:
-                await notification_channel.send(f"{ctx.author.mention} взял тикет {ctx.channel.name}.")
+                await notification_channel.send(
+                    f"{ctx.author.mention} ({ctx.author.name}#{ctx.author.discriminator}, {ctx.author.top_role}) "
+                    f"has claimed the ticket `{ctx.channel.name}`."
+                )
 
     @commands.group(name='claim_bypass', invoke_without_command=True)
     async def claim_bypass_(self, ctx):
-        """Управление ролями обхода проверки взятия тикета"""
+        """Manage claim bypass roles"""
         await ctx.send_help(ctx.command)
 
     @checks.has_permissions(PermissionLevel.ADMIN)
     @commands.guild_only()
     @claim_bypass_.command(name='add')
     async def claim_bypass_add(self, ctx, *bypass_roles: discord.Role):
-        """Добавить роль для обхода проверки взятия тикета"""
+        """Add a role to bypass claim check"""
         config = await self.db.find_one({'_id': 'config'})
         if not config:
             await self.db.insert_one({'_id': 'config', 'bypass_roles': [r.id for r in bypass_roles]})
@@ -100,25 +110,25 @@ class ClaimThread(commands.Cog):
             await self.db.find_one_and_update({'_id': 'config'}, {'$addToSet': {'bypass_roles': {'$each': [r.id for r in bypass_roles]}}})
 
         added = ", ".join(f"`{r.name}`" for r in bypass_roles)
-        await ctx.send(f'**Добавлены роли для обхода проверки**:\n{added}')
+        await ctx.send(f'**Added to bypass roles**:\n{added}')
 
     @checks.has_permissions(PermissionLevel.MODERATOR)
     @commands.guild_only()
     @claim_bypass_.command(name='remove')
     async def claim_bypass_remove(self, ctx, role: discord.Role):
-        """Удалить роль для обхода проверки взятия тикета"""
+        """Remove a bypass role from claim check"""
         config = await self.db.find_one({'_id': 'config'})
         if config and 'bypass_roles' in config and role.id in config['bypass_roles']:
             await self.db.find_one_and_update({'_id': 'config'}, {'$pull': {'bypass_roles': role.id}})
-            await ctx.send(f'**Удалена роль для обхода проверки**:\n`{role.name}`')
+            await ctx.send(f'**Removed from bypass roles**:\n`{role.name}`')
         else:
-            await ctx.send(f'`{role.name}` не находится в списке ролей для обхода проверки')
+            await ctx.send(f'`{role.name}` is not in bypass roles')
 
     @checks.has_permissions(PermissionLevel.MODERATOR)
     @checks.thread_only()
     @commands.command()
     async def overridereply(self, ctx, *, msg: str = ""):
-        """Позволяет модераторам обходить проверку взятия тикета при ответе"""
+        """Allow moderators to bypass claim thread check in reply"""
         await ctx.invoke(self.bot.get_command('reply'), msg=msg)
 
 
