@@ -1,14 +1,17 @@
+# Credits and original author: https://github.com/fourjr/modmail-plugins/blob/master/claim/claim.py
+# Slightly modified for Minion_Kadin#2022 (discord)
+# Please use the original plugin as this one may cause your bot to nuke the world
+
 import discord
 from discord.ext import commands
+
 from core import checks
 from core.models import PermissionLevel
 from core.utils import match_user_id
 
-LOG_CHANNEL_ID = 1247301906691526827  # Replace with your log channel ID
 
 class ClaimThread(commands.Cog):
     """Allows supporters to claim thread by sending claim in the thread channel"""
-
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.api.get_plugin_partition(self)
@@ -17,6 +20,9 @@ class ClaimThread(commands.Cog):
         self.bot.get_command('areply').add_check(check_reply)
         self.bot.get_command('fareply').add_check(check_reply)
         self.bot.get_command('freply').add_check(check_reply)
+        
+        # Notification channel ID
+        self.notification_channel_id = 1247301906691526827  # Set your channel ID here
 
     async def check_claimer(self, ctx, claimer_id):
         config = await self.db.find_one({'_id': 'config'})
@@ -101,19 +107,14 @@ class ClaimThread(commands.Cog):
                 embed.description = description
                 await ctx.reply(embed=embed)
 
-            # Send log message to log channel
-            log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    color=discord.Color.blue(),
-                    title="Thread Claimed",
-                    description=f"{ctx.author.mention} ({ctx.author}) has claimed the thread `{ctx.thread.name}`.",
-                    timestamp=ctx.message.created_at
-                )
-                log_embed.add_field(name="Thread", value=ctx.thread.mention)
-                log_embed.add_field(name="Claimed By", value=f"{ctx.author.mention} ({ctx.author})")
-                log_embed.set_footer(text=f"User ID: {ctx.author.id}")
-                await log_channel.send(embed=log_embed)
+            # Notification in the specified channel
+            if self.notification_channel_id:
+                notification_channel = self.bot.get_channel(self.notification_channel_id)
+                if notification_channel:
+                    await notification_channel.send(
+                        f"{ctx.author.mention} ({ctx.author.name}#{ctx.author.discriminator}, {ctx.author.top_role}) "
+                        f"has claimed the ticket `{ctx.thread.channel.name}`."
+                    )
 
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     @commands.command()
@@ -170,28 +171,4 @@ class ClaimThread(commands.Cog):
 
         mentions = self.bot.config["subscriptions"][str(ctx.thread.id)]
 
-        if ctx.author.mention in mentions:
-            mentions.remove(ctx.author.mention)
-            await self.bot.config.update()
-            description += f"{ctx.author.mention} is now unsubscribed from this thread."
-
-        if description == "":
-            description = "Nothing to do"
-
-        embed.description = description
-        await ctx.send(embed=embed)
-
-    @checks.has_permissions(PermissionLevel.MODERATOR)
-    @checks.thread_only()
-    @commands.command()
-    async def forceclaim(self, ctx, *, member: discord.Member):
-        """Make a user force claim an already claimed thread"""
-        if not await self.check_claimer(ctx, member.id):
-            return await ctx.reply(f"Limit reached, can't claim the thread.")
-
-        thread = await self.db.find_one({'thread_id': str(ctx.thread.channel.id), 'guild': str(self.bot.modmail_guild.id)})
-        if thread is None:
-            await self.db.insert_one({'thread_id': str(ctx.thread.channel.id), 'guild': str(self.bot.modmail_guild.id), 'claimers': [str(member.id)]})
-            await ctx.send(f'{member.name} is added to claimers')
-        elif str(member.id) not in thread['claimers']:
-            await self.db.find_one_and_update({'thread_id': str(ctx.thread.channel.id), 'guild': str(self.bot.modmail
+        if ctx.author.mention in
